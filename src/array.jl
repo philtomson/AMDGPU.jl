@@ -22,10 +22,19 @@ end
 
 GPUArrays.storage(a::ROCArray) = a.buf
 
+# Luminal.jl: an optional scope that records every array derived from another (reshape, reinterpret, ...).
+# A derived array holds its own reference to the device buffer until it is finalized, so explicitly freeing
+# the parent does not release the memory while a derived wrapper is still waiting for the GC. A caller that
+# knows its temporaries are dead sets `DERIVE_SCOPE[] = Any[]`, runs, and `unsafe_free!`s the recorded arrays.
+const DERIVE_SCOPE = Ref{Union{Nothing, Vector{Any}}}(nothing)
+
 function GPUArrays.derive(::Type{T}, x::ROCArray, dims::Dims{N}, offset::Int) where {N, T}
     ref = copy(x.buf)
     offset += (x.offset * Base.elsize(x)) ÷ sizeof(T)
-    ROCArray{T, N}(ref, dims; offset)
+    r = ROCArray{T, N}(ref, dims; offset)
+    scope = DERIVE_SCOPE[]
+    scope === nothing || push!(scope, r)
+    return r
 end
 
 """
