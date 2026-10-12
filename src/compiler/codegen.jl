@@ -7,6 +7,11 @@ struct HIPCompilerParams <: AbstractCompilerParams
     # a hardware RMW instruction that is faster than emulating
     # the atomic operation using an atomic compare-and-swap (CAS) loop.
     unsafe_fp_atomics::Bool
+    # Launch bounds, set as the `amdgpu-flat-work-group-size` / `amdgpu-waves-per-eu` function attributes
+    # (what `__launch_bounds__` does in HIP). `0` = not set.
+    # Without them LLVM assumes workgroups of up to 1024 threads, which caps a kernel at 192 VGPRs (wave32).
+    flat_work_group_size::Int
+    waves_per_eu::Int
 end
 
 const HIPCompilerConfig = CompilerConfig{GCNCompilerTarget, HIPCompilerParams}
@@ -78,6 +83,15 @@ function GPUCompiler.finish_module!(
         push!(attrs, target_cpu_attr)
         push!(attrs, target_features_attr)
         push!(attrs, atomic_attr)
+
+        if job.config.params.flat_work_group_size > 0
+            n = job.config.params.flat_work_group_size
+            push!(attrs, StringAttribute("amdgpu-flat-work-group-size", "$n,$n"))
+        end
+        if job.config.params.waves_per_eu > 0
+            n = job.config.params.waves_per_eu
+            push!(attrs, StringAttribute("amdgpu-waves-per-eu", "$n"))
+        end
     end
 
     # Workaround for the lack of zeroinitializer support for LDS.
@@ -119,6 +133,7 @@ end
 function compiler_config(dev::HIP.HIPDevice;
     name::Union{String, Nothing} = nothing, kernel::Bool = true,
     unsafe_fp_atomics::Bool = true, wavefrontsize64::Bool = HIP.wavefrontsize(dev) == 64,
+    flat_work_group_size::Int = 0, waves_per_eu::Int = 0,
 )
     dev_isa, features = parse_llvm_features(HIP.gcn_arch(dev))
     if !isempty(features)
@@ -132,7 +147,7 @@ function compiler_config(dev::HIP.HIPDevice;
     end
 
     target = GCNCompilerTarget(; dev_isa, features)
-    params = HIPCompilerParams(wavefrontsize64, unsafe_fp_atomics)
+    params = HIPCompilerParams(wavefrontsize64, unsafe_fp_atomics, flat_work_group_size, waves_per_eu)
     CompilerConfig(target, params; kernel, name, always_inline=true)
 end
 
@@ -155,6 +170,14 @@ The following kwargs are supported:
     On single- or double-precision floating-point values this may generate
     a hardware RMW instruction that is faster than emulating
     the atomic operation using an atomic compare-and-swap (CAS) loop.
+- `flat_work_group_size::Int = 0`:
+    The exact workgroup size (threads) the kernel will be launched with, like HIP's
+    `__launch_bounds__(N)`. LLVM assumes 1024 when it is not given, which limits the registers
+    per thread; a smaller value lets it use more. Launching with a different workgroup size
+    is an error (the hardware faults). `0` leaves it unset.
+- `waves_per_eu::Int = 0`:
+    Minimum waves per SIMD to keep occupied (`amdgpu-waves-per-eu`); trades registers for
+    occupancy. `0` leaves it unset.
 """
 function hipfunction(f::F, tt::TT = Tuple{}; kwargs...) where {F <: Core.Function, TT}
     Base.@lock hipfunction_lock begin

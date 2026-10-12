@@ -93,7 +93,7 @@ register methods for the the `AMDGPU.Adaptor` type.
 rocconvert(arg) = adapt(Runtime.Adaptor(), arg)
 
 const MACRO_KWARGS = [:launch]
-const COMPILER_KWARGS = [:name, :unsafe_fp_atomics, :wavefrontsize64]
+const COMPILER_KWARGS = [:name, :unsafe_fp_atomics, :wavefrontsize64, :flat_work_group_size, :waves_per_eu]
 const LAUNCH_KWARGS = [:gridsize, :groupsize, :shmem, :stream, :cooperative]
 
 """
