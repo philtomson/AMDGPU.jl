@@ -108,10 +108,16 @@ end
 
 GPUArrays.storage(a::ROCArray) = a.buf
 
+# Luminal.jl trial: records every derived array (see the fork's DERIVE_SCOPE)
+const DERIVE_SCOPE = Ref{Union{Nothing, Vector{Any}}}(nothing)
+
 function GPUArrays.derive(::Type{T}, x::ROCArray, dims::Dims{N}, offset::Int) where {N, T}
     ref = copy(x.buf)
     offset = x.offset + offset * aligned_sizeof(T)
-    ROCArray{T, N}(ref, dims; offset)
+    r = ROCArray{T, N}(ref, dims; offset)
+    scope = DERIVE_SCOPE[]
+    scope === nothing || push!(scope, r)
+    return r
 end
 
 """
